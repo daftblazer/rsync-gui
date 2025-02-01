@@ -3,6 +3,7 @@
 A simple GTK4-based graphical user interface for rsync, making it easy to synchronize directories with a visual interface.
 
 ![Rsync GUI Screenshot](screenshots/rsync-gui.png)
+![Rsync Status Screenshot](screenshots/rsync-status.png)
 
 ## Features
 

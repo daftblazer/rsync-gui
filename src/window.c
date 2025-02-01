@@ -184,13 +184,13 @@ void rsync_gtk_window_init(GtkWidget *window) {
     g_object_set_data_full(G_OBJECT(window), "win-data", win, g_free);
     
     gtk_window_set_title(GTK_WINDOW(window), "Rsync GUI");
-    gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
+    gtk_window_set_default_size(GTK_WINDOW(window), 600, 250);  // Reduced height since we don't need as much space
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(box, 12);
-    gtk_widget_set_margin_end(box, 12);
-    gtk_widget_set_margin_top(box, 12);
-    gtk_widget_set_margin_bottom(box, 12);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
 
     // Source folder button
     win->source_button = gtk_button_new_with_label("Select Source Folder");
@@ -213,6 +213,7 @@ void rsync_gtk_window_init(GtkWidget *window) {
 
     // Sync button
     win->sync_button = gtk_button_new_with_label("Start Sync");
+    gtk_widget_set_margin_top(win->sync_button, 6);  // Add some extra spacing above the sync button
     g_signal_connect(win->sync_button, "clicked",
         G_CALLBACK(sync_clicked), win);
     gtk_box_append(GTK_BOX(box), win->sync_button);
