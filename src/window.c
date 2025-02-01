@@ -9,17 +9,64 @@ typedef struct {
     GtkWidget *delete_check;
     GtkWidget *dry_run_check;
     GtkWidget *sync_button;
-    GtkWidget *output_text;
     char *source_path;
     char *dest_path;
 } RsyncGtkWindow;
 
+typedef struct {
+    RsyncGtkProgressWindow *progress_window;
+    FILE *pipe;
+    GIOChannel *channel;
+    guint source_id;
+} SyncData;
+
+static void free_sync_data(SyncData *sync_data) {
+    if (sync_data->channel) {
+        g_io_channel_shutdown(sync_data->channel, TRUE, NULL);
+        g_io_channel_unref(sync_data->channel);
+    }
+    if (sync_data->pipe) {
+        pclose(sync_data->pipe);
+    }
+    g_free(sync_data);
+}
+
+static gboolean read_rsync_output(GIOChannel *channel, GIOCondition condition, gpointer user_data) {
+    SyncData *sync_data = user_data;
+    gchar *line;
+    gsize length;
+    GError *error = NULL;
+    
+    if (condition & G_IO_HUP) {
+        rsync_gtk_progress_window_done(sync_data->progress_window);
+        free_sync_data(sync_data);
+        return G_SOURCE_REMOVE;
+    }
+    
+    switch (g_io_channel_read_line(channel, &line, &length, NULL, &error)) {
+        case G_IO_STATUS_NORMAL:
+            rsync_gtk_progress_window_update(sync_data->progress_window, line);
+            g_free(line);
+            return G_SOURCE_CONTINUE;
+            
+        case G_IO_STATUS_ERROR:
+            g_warning("Error reading rsync output: %s", error->message);
+            g_error_free(error);
+            // fallthrough
+            
+        case G_IO_STATUS_EOF:
+        default:
+            rsync_gtk_progress_window_done(sync_data->progress_window);
+            free_sync_data(sync_data);
+            return G_SOURCE_REMOVE;
+    }
+}
+
 static void sync_clicked(G_GNUC_UNUSED GtkButton *button, RsyncGtkWindow *win) {
     if (!win->source_path || !win->dest_path) {
-        gtk_text_buffer_set_text(
-            gtk_text_view_get_buffer(GTK_TEXT_VIEW(win->output_text)),
-            "Please select both source and destination folders",
-            -1);
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Please select both source and destination folders");
+        gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(button))));
+        g_object_unref(dialog);
         return;
     }
 
@@ -52,27 +99,31 @@ static void sync_clicked(G_GNUC_UNUSED GtkButton *button, RsyncGtkWindow *win) {
     g_free(source_with_slash);
     g_free(dest_with_slash);
 
-    FILE *pipe = popen(command, "r");
-    if (!pipe) {
-        gtk_text_buffer_set_text(
-            gtk_text_view_get_buffer(GTK_TEXT_VIEW(win->output_text)),
-            "Error executing rsync command",
-            -1);
+    SyncData *sync_data = g_new0(SyncData, 1);
+    sync_data->pipe = popen(command, "r");
+    if (!sync_data->pipe) {
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Error executing rsync command");
+        gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(button))));
+        g_object_unref(dialog);
+        g_free(sync_data);
         return;
     }
-
-    char buffer[1024];
-    GString *output = g_string_new(NULL);
-    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-        g_string_append(output, buffer);
-    }
-    pclose(pipe);
-
-    gtk_text_buffer_set_text(
-        gtk_text_view_get_buffer(GTK_TEXT_VIEW(win->output_text)),
-        output->str,
-        -1);
-    g_string_free(output, TRUE);
+    
+    sync_data->progress_window = rsync_gtk_progress_window_new(
+        GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(button))));
+    
+    // Set up IO channel to read rsync output
+    int fd = fileno(sync_data->pipe);
+    sync_data->channel = g_io_channel_unix_new(fd);
+    g_io_channel_set_encoding(sync_data->channel, NULL, NULL);
+    g_io_channel_set_flags(sync_data->channel,
+                          g_io_channel_get_flags(sync_data->channel) | G_IO_FLAG_NONBLOCK,
+                          NULL);
+    
+    sync_data->source_id = g_io_add_watch(sync_data->channel,
+                                         G_IO_IN | G_IO_HUP,
+                                         read_rsync_output,
+                                         sync_data);
 }
 
 static void folder_selected_cb(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data) {
@@ -165,15 +216,6 @@ void rsync_gtk_window_init(GtkWidget *window) {
     g_signal_connect(win->sync_button, "clicked",
         G_CALLBACK(sync_clicked), win);
     gtk_box_append(GTK_BOX(box), win->sync_button);
-
-    // Output text view
-    GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(scrolled, TRUE);
-    win->output_text = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(win->output_text), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(win->output_text), GTK_WRAP_WORD_CHAR);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), win->output_text);
-    gtk_box_append(GTK_BOX(box), scrolled);
 
     gtk_window_set_child(GTK_WINDOW(window), box);
 }

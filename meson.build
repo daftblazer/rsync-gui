@@ -16,6 +16,8 @@ executable('rsync-gtk',
   'src/main.c',
   'src/window.c',
   'src/window.h',
+  'src/progress_window.c',
+  'src/progress_window.h',
   resources,
   dependencies: gtkdep,
   install: true)
